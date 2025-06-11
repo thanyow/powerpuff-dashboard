@@ -370,4 +370,4 @@ Generated on: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 # Footer
 st.markdown("---")
-st.markdown("*Powerpuff Girls Group | Customer Loyalty Prediction Dashboard*")
+st.markdown("*Powerpuff Girls Group | Customer Loyalty Prediction Dashboard*") 
