@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import plotly.express as px
+from sklearn.metrics import silhouette_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_curve, roc_auc_score
 from sklearn.model_selection import train_test_split
 
@@ -22,9 +23,11 @@ def load_resources():
     try:
         df = pd.read_csv("Customer Purchasing Behaviors.csv")
         model = joblib.load("model.pkl")
-        scaler = joblib.load("scaler.pkl")
+        scaler_kmeans = joblib.load("scaler_kmeans.pkl")
+        scaler_logreg = joblib.load("scaler_logreg.pkl")
         kmeans = joblib.load("kmeans_model.pkl")
-        return df, model, scaler, kmeans
+
+        return df, model, scaler_kmeans, scaler_logreg, kmeans
     except FileNotFoundError as e:
         st.error(f"File not found: {e}")
         st.stop()
@@ -32,7 +35,7 @@ def load_resources():
         st.error(f"Error loading resources: {e}")
         st.stop()
 
-df, model, scaler, kmeans = load_resources()
+df, model, scaler_kmeans, scaler_logreg, kmeans = load_resources()
 
 # Preprocessing
 region_map = {'North': 0, 'South': 1, 'West': 2, 'East': 3}
@@ -41,45 +44,21 @@ df['region_encoded'] = df['region'].map(region_map)
 df['loyal_customer'] = (df['loyalty_score'] >= 7).astype(int)
 
 # Debug: Check what features the scaler and kmeans expect
-st.sidebar.write("**Debug Info:**")
-st.sidebar.write(f"Scaler features: {scaler.feature_names_in_}")
-st.sidebar.write(f"KMeans n_features: {kmeans.n_features_in_}")
+st.sidebar.write("✅ scaler_kmeans loaded")
+st.sidebar.write("✅ scaler_logreg loaded")
 
 # Handle feature mismatch between scaler and kmeans
 try:
-    # Get the features that the scaler was trained on
-    scaler_features = list(scaler.feature_names_in_)
-    st.sidebar.write(f"Scaler expects: {scaler_features}")
-    
-    # The KMeans expects 5 features, but scaler has 4
-    # Let's determine what the 5th feature should be
-    if len(scaler_features) == 4 and kmeans.n_features_in_ == 5:
-        # Likely the KMeans was trained with region_encoded as the 5th feature
-        kmeans_features = scaler_features + ['region_encoded']
-        st.sidebar.write(f"KMeans likely expects: {kmeans_features}")
-        
-        # First scale the 4 features with the scaler
-        X_for_scaler = df[scaler_features]
-        X_scaled = scaler.transform(X_for_scaler)
-        
-        # Then add the region_encoded feature (unscaled)
-        region_encoded_col = df['region_encoded'].values.reshape(-1, 1)
-        X_for_kmeans = np.hstack([X_scaled, region_encoded_col])
-        
-        # Now predict with KMeans
-        df['Cluster'] = kmeans.predict(X_for_kmeans)
-        
-    else:
-        # Fallback: try to use scaler features directly
-        X_cluster = df[scaler_features]
-        X_scaled = scaler.transform(X_cluster)
-        df['Cluster'] = kmeans.predict(X_scaled)
-    
+    # Use only the 3 clustering features used during model training
+    cluster_features = ['age', 'annual_income', 'purchase_amount']
+    X_cluster = df[cluster_features]
+    X_scaled = scaler_kmeans.transform(X_cluster)
+    df['Cluster'] = kmeans.predict(X_scaled)
 except Exception as e:
     st.error(f"Error in clustering: {e}")
-    st.write("Available columns in dataframe:", df.columns.tolist())
-    st.write("Trying alternative clustering approach...")
-    
+    st.write("Make sure the clustering model and scaler are trained on the same 3 features.")
+    st.stop()
+
     # Alternative: Create clusters without using the saved KMeans model
     try:
         from sklearn.cluster import KMeans
@@ -94,7 +73,7 @@ except Exception as e:
         # Standardize the features
         from sklearn.preprocessing import StandardScaler
         temp_scaler = StandardScaler()
-        X_scaled = temp_scaler.fit_transform(X_cluster)
+        X_scaled = scaler_logreg.transform(X)
         
         # Fit and predict
         df['Cluster'] = new_kmeans.fit_predict(X_scaled)
@@ -223,6 +202,11 @@ elif plot_option == "Cluster Analysis":
             for cid, val in cluster_stats.items()
         ])
         st.dataframe(cluster_df, use_container_width=True)
+
+        sil_score = silhouette_score(X_scaled, kmeans.labels_)
+        st.info(f"Silhouette Score for k={kmeans.n_clusters}: **{sil_score:.2f}**")
+        st.write("Silhouette Score indicates how well-separated the clusters are. Higher values indicate better-defined clusters.")
+
     except Exception as e:
         st.error(f"Error creating cluster analysis: {e}")
 
@@ -246,28 +230,13 @@ with st.form("predict_form"):
 
 def predict_segment(input_df):
     try:
-        # Handle the same feature mismatch as in the main clustering
-        scaler_features = list(scaler.feature_names_in_)
-        
-        if len(scaler_features) == 4 and kmeans.n_features_in_ == 5:
-            # Scale the 4 features first
-            cluster_input = input_df[scaler_features]
-            scaled = scaler.transform(cluster_input)
-            
-            # Add the region_encoded feature (unscaled)
-            region_encoded = input_df['region_encoded'].values.reshape(-1, 1)
-            X_for_kmeans = np.hstack([scaled, region_encoded])
-            
-            return kmeans.predict(X_for_kmeans)[0]
-        else:
-            # Use scaler features directly
-            cluster_input = input_df[scaler_features]
-            scaled = scaler.transform(cluster_input)
-            return kmeans.predict(scaled)[0]
-            
+        X = input_df[['age', 'annual_income', 'purchase_amount']]
+        X_scaled = scaler_kmeans.transform(X)
+        return kmeans.predict(X_scaled)[0]
     except Exception as e:
         st.error(f"Error in segment prediction: {e}")
         return 0
+
 
 if submit:
     try:
