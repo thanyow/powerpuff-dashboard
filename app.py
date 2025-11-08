@@ -17,7 +17,7 @@ st.write("Enter customer data to predict whether the customer is loyal or not.")
 st.markdown("---")
 st.subheader("📊 Model Evaluation")
 
-# Load data and models
+# Load data and models!
 @st.cache_data
 def load_resources():
     try:
